@@ -89,3 +89,41 @@ export async function fetchProxyStatus(
     return { status: null, reason: "parse" };
   }
 }
+/** GET /api/quota?model=<id>: the proxy's pool behind one model, already aggregated. */
+export interface ProxyPoolQuota {
+  model: string;
+  family: string;
+  label: string;
+  /** Accounts able to serve the model; 0 means the model cannot be served. */
+  accounts: number;
+  windows: Array<{ window: "5h" | "weekly" | string; remainingPercent: number; resetTime?: string }>;
+}
+
+export interface ProxyPoolResult {
+  pool: ProxyPoolQuota | null;
+  reason: ProxyFetchFailureReason | null;
+  /** The proxy predates /api/quota (404): fall back to /api/status. */
+  unsupported?: boolean;
+}
+
+export async function fetchPoolQuota(port: number, modelID: string, timeoutMs: number): Promise<ProxyPoolResult> {
+  let response: Response;
+  try {
+    response = await fetch(`http://127.0.0.1:${port}/api/quota?model=${encodeURIComponent(modelID)}`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    return { pool: null, reason: failureReason(error) };
+  }
+
+  if (response.status === 404) return { pool: null, reason: "http", unsupported: true };
+  if (!response.ok) return { pool: null, reason: "http" };
+
+  try {
+    const pool = (await response.json()) as ProxyPoolQuota;
+    if (!pool || !Array.isArray(pool.windows)) return { pool: null, reason: "parse" };
+    return { pool, reason: null };
+  } catch {
+    return { pool: null, reason: "parse" };
+  }
+}

@@ -129,6 +129,7 @@ interface QuotaState {
 function createQuotaState(ctx: Ctx): QuotaState {
   const [state, setState] = createSignal<CompactState>({ status: "disabled" });
   const [activeIds, setActiveIds] = createSignal<string[]>([]);
+  let activeModel: SessionModelMeta = {};
   let previous: CompactState = { status: "disabled" };
   let appliedIds = new Set<string>();
   let resolveVersion = 0;
@@ -137,7 +138,10 @@ function createQuotaState(ctx: Ctx): QuotaState {
   const lifecycle = createRefreshLifecycle({
     load: async () => {
       const providers = activeProviders(activeIds());
-      const result = await collectQuota(providers, { requestTimeoutMs: REQUEST_TIMEOUT_MS });
+      const result = await collectQuota(providers, {
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
+        model: activeModel,
+      });
       return { providers, result };
     },
     apply: (payload) => {
@@ -193,6 +197,7 @@ function createQuotaState(ctx: Ctx): QuotaState {
     if (!sessionID) {
       if (resolvedKey === undefined) return;
       resolvedKey = undefined;
+      activeModel = {};
       setActiveIds([]);
       lifecycle.reload();
       return;
@@ -205,6 +210,7 @@ function createQuotaState(ctx: Ctx): QuotaState {
     const key = `${sessionID}:${meta.providerID ?? ""}/${meta.modelID ?? ""}`;
     if (key === resolvedKey) return;
     resolvedKey = key;
+    activeModel = meta;
 
     const ids = PROVIDERS.filter((provider) => provider.matchesModel(meta)).map(
       (provider) => provider.id,

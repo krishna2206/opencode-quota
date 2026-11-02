@@ -8,7 +8,7 @@
  */
 
 import type { QuotaEntry } from "../types.js";
-import type { ProxyAccount, ProxyStatus } from "./fetch.js";
+import type { ProxyAccount, ProxyPoolQuota, ProxyStatus } from "./fetch.js";
 
 export const ANTIGRAVITY_LABEL = "Antigravity";
 
@@ -125,4 +125,25 @@ export function buildAntigravityEntries(status: ProxyStatus): QuotaEntry[] {
   return (["5h", "weekly"] as const)
     .map((window) => buildWindowEntry(status, window, now))
     .filter((entry): entry is QuotaEntry => entry !== null);
+}
+
+/**
+ * Entries for the pool behind the session's model (GET /api/quota). The group
+ * names the pool, since Gemini, Claude and Gemini 4 Argon have separate quotas.
+ */
+export function buildPoolEntries(pool: ProxyPoolQuota): QuotaEntry[] {
+  const group = pool.family === "gemini" ? ANTIGRAVITY_LABEL : `${ANTIGRAVITY_LABEL} ${pool.label}`;
+  return pool.windows
+    .filter((window) => Number.isFinite(window.remainingPercent))
+    .map((window) => {
+      const label = window.window === "weekly" ? "7d" : window.window;
+      return {
+        kind: "percent" as const,
+        name: `${group} ${label}`,
+        group,
+        label,
+        percentRemaining: Math.max(0, Math.min(100, window.remainingPercent)),
+        ...(window.resetTime ? { resetTimeIso: window.resetTime } : {}),
+      };
+    });
 }

@@ -1,14 +1,20 @@
 /**
  * Antigravity provider.
  *
- * Reads Google Antigravity quota from the local proxy (GET /api/status) and
- * aggregates it into a health-weighted average per model family. Owns its
- * fetch (local HTTP), its parse (weighted average), and its retry policy
- * (short backoff for proxy cold-start).
+ * Reads the quota of the pool behind the session's model from the local proxy
+ * (GET /api/quota?model=<id>): Gemini, Claude and Gemini 4 Argon each have
+ * their own quota, and the proxy averages it over the accounts able to serve
+ * the model. A proxy without that endpoint falls back to GET /api/status,
+ * aggregated here into a health-weighted Gemini average.
  */
 
-import { ANTIGRAVITY_STATUS_TIMEOUT_MS, type ProxyFetchFailureReason } from "./fetch.js";
-import { ANTIGRAVITY_LABEL, buildAntigravityEntries } from "./parse.js";
+import {
+  ANTIGRAVITY_STATUS_TIMEOUT_MS,
+  fetchPoolQuota,
+  resolveProxyPort,
+  type ProxyFetchFailureReason,
+} from "./fetch.js";
+import { ANTIGRAVITY_LABEL, buildAntigravityEntries, buildPoolEntries } from "./parse.js";
 import { fetchProxyStatusWithRetry } from "./retry.js";
 import type { Provider, ProviderContext, ProviderResult } from "../types.js";
 
@@ -36,6 +42,24 @@ export const antigravityProvider: Provider = {
 
   async load(ctx: ProviderContext): Promise<ProviderResult> {
     const timeoutMs = Math.max(1_000, Math.min(ctx.requestTimeoutMs, ANTIGRAVITY_STATUS_TIMEOUT_MS));
+
+    const modelID = ctx.model?.modelID?.trim();
+    if (modelID) {
+      const result = await fetchPoolQuota(await resolveProxyPort(), modelID, timeoutMs);
+      if (result.pool) {
+        if (result.pool.accounts === 0) {
+          return {
+            attempted: true,
+            entries: [],
+            errors: [{ label: ANTIGRAVITY_LABEL, message: "No account can serve this model" }],
+          };
+        }
+        return { attempted: true, entries: buildPoolEntries(result.pool), errors: [] };
+      }
+      if (!result.unsupported) {
+        return { attempted: true, entries: [], errors: [antigravityError(result.reason)] };
+      }
+    }
     const result = await fetchProxyStatusWithRetry(timeoutMs);
 
     if (!result.status) {

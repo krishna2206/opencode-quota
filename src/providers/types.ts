@@ -67,6 +67,8 @@ export interface ProviderContext {
    * Each provider is free to cap/normalize its own timeout.
    */
   requestTimeoutMs: number;
+  /** The session's model, for providers whose quota depends on it. */
+  model?: SessionModelMeta;
 }
 
 export interface SessionModelMeta {
