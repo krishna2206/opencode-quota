@@ -1,38 +1,30 @@
 /**
- * OpenCode Go: parse scraped usage into quota entries.
- *
- * Displays the rolling (~5h) and weekly windows as percent-based entries.
+ * OpenCode Go: the dashboard's rolling (~5h) and weekly windows. The monthly
+ * window the dashboard also shows is left out for now.
  */
 
-import type { QuotaEntry } from "../types.js";
+import type { ProviderResult, QuotaWindow } from "../../quota/types.js";
+import { failure } from "../errors.js";
 import type { ScrapedUsage } from "./fetch.js";
 
 export const OPENCODE_GO_LABEL = "OpenCode Go";
 
-const OPENCODE_GO_WINDOWS: Array<{ window: "rolling" | "weekly"; name: string; label: string }> = [
-  { window: "rolling", name: `${OPENCODE_GO_LABEL} 5h`, label: "5h:" },
-  { window: "weekly", name: `${OPENCODE_GO_LABEL} Weekly`, label: "Weekly:" },
-];
+const WINDOWS = [
+  { source: "rolling", span: "5h" },
+  { source: "weekly", span: "7d" },
+] as const;
 
-export function buildOpenCodeGoEntries(usage: ScrapedUsage, now: number): QuotaEntry[] {
-  const entries: QuotaEntry[] = [];
+export function parseOpenCodeGoUsage(usage: ScrapedUsage, now: number): ProviderResult {
+  const windows = WINDOWS.flatMap(({ source, span }): QuotaWindow[] => {
+    const value = usage[source];
+    if (!value) return [];
+    return [{
+      span,
+      remainingPercent: Math.max(0, 100 - Math.max(0, value.usagePercent)),
+      resetAt: new Date(now + Math.max(0, value.resetInSec) * 1_000).toISOString(),
+    }];
+  });
 
-  for (const spec of OPENCODE_GO_WINDOWS) {
-    const value = usage[spec.window];
-    if (!value) continue;
-
-    const usagePercent = Math.max(0, value.usagePercent);
-    const resetInSec = Math.max(0, value.resetInSec);
-
-    entries.push({
-      kind: "percent",
-      name: spec.name,
-      group: OPENCODE_GO_LABEL,
-      label: spec.label,
-      percentRemaining: Math.max(0, 100 - usagePercent),
-      resetTimeIso: new Date(now + resetInSec * 1_000).toISOString(),
-    });
-  }
-
-  return entries;
+  if (windows.length === 0) return failure("no usage windows on the dashboard");
+  return { ok: true, quotas: [{ kind: "window", windows }] };
 }

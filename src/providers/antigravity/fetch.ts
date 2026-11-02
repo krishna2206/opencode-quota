@@ -1,129 +1,53 @@
 /**
- * Antigravity: HTTP fetch of the local proxy /api/status.
+ * Antigravity: GET <url>/api/quota?model=<id> on antigravity-proxy.
  *
- * The proxy owns OAuth, token refresh and the periodic Google quota scrape;
- * this fetch is a read-only client. The port is resolved from the configured
- * `antigravity-proxy` baseURL, then the ANTIGRAVITY_PROXY_PORT env var, then
- * the default.
+ * The proxy returns the pool behind the model, already aggregated over the
+ * accounts able to serve it (Gemini, Claude and Gemini 4 Argon each have
+ * their own quota). Retried briefly: the proxy may still be starting.
  */
 
-export const ANTIGRAVITY_DEFAULT_PORT = 7438;
-export const ANTIGRAVITY_STATUS_TIMEOUT_MS = 5_000;
+import { describeFetchError, httpError, MESSAGES } from "../errors.js";
+import type { Fetched } from "../provider.js";
 
-export interface ProxyQuotaBucket {
-  bucketId: string;
-  displayName: string;
-  window: "weekly" | "5h" | string;
-  resetTime?: string;
-  remainingFraction?: number;
-}
-
-export interface ProxyQuotaSummaryGroup {
-  displayName: string;
-  buckets: ProxyQuotaBucket[];
-}
-
-export interface ProxyAccount {
-  email: string;
-  effectiveHealthScore?: number;
-  quotaSummary?: ProxyQuotaSummaryGroup[];
-  /** Legacy flat quota fallback (groupName + remainingFraction). */
-  quota?: Array<{ groupName: string; remainingFraction?: number; resetTime?: string }>;
-}
-
-export interface ProxyStatus {
-  accounts: ProxyAccount[];
-}
-
-export type ProxyFetchFailureReason =
-  | "refused" // nothing listening on the port (proxy not installed/started)
-  | "timeout" // request exceeded the timeout
-  | "http" // the proxy answered with a non-OK status
-  | "parse" // the proxy answered with an unparseable body
-  | "network"; // any other transport error
-
-export interface ProxyStatusResult {
-  status: ProxyStatus | null;
-  reason: ProxyFetchFailureReason | null;
-}
-
-function failureReason(error: unknown): ProxyFetchFailureReason {
-  const errno = (error as { code?: string; cause?: unknown } | undefined);
-  const code = errno?.code ?? (errno?.cause && typeof errno.cause === "object" ? (errno.cause as { code?: string }).code : undefined);
-
-  if (error instanceof Error && error.name === "TimeoutError") return "timeout";
-  if (code === "ECONNREFUSED" || code === "ECONNRESET") return "refused";
-  return "network";
-}
-
-export async function resolveProxyPort(): Promise<number> {
-  const envPort = process.env.ANTIGRAVITY_PROXY_PORT?.trim();
-  if (envPort) {
-    const parsed = Number(envPort);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-  return ANTIGRAVITY_DEFAULT_PORT;
-}
-
-export async function fetchProxyStatus(
-  port: number,
-  timeoutMs: number,
-): Promise<ProxyStatusResult> {
-  let response: Response;
-  try {
-    response = await fetch(`http://127.0.0.1:${port}/api/status`, {
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (error) {
-    return { status: null, reason: failureReason(error) };
-  }
-
-  if (!response.ok) {
-    return { status: null, reason: "http" };
-  }
-
-  try {
-    const status = (await response.json()) as ProxyStatus;
-    return { status, reason: null };
-  } catch {
-    return { status: null, reason: "parse" };
-  }
-}
-/** GET /api/quota?model=<id>: the proxy's pool behind one model, already aggregated. */
-export interface ProxyPoolQuota {
+export interface AntigravityPool {
   model: string;
+  /** "gemini" | "claude" | "argon" */
   family: string;
+  /** "Gemini" | "Claude" | "Gemini 4 Argon" */
   label: string;
-  /** Accounts able to serve the model; 0 means the model cannot be served. */
+  /** Accounts able to serve the model; 0 means none can. */
   accounts: number;
-  windows: Array<{ window: "5h" | "weekly" | string; remainingPercent: number; resetTime?: string }>;
+  windows: Array<{ window: string; remainingPercent: number; resetTime?: string }>;
 }
 
-export interface ProxyPoolResult {
-  pool: ProxyPoolQuota | null;
-  reason: ProxyFetchFailureReason | null;
-  /** The proxy predates /api/quota (404): fall back to /api/status. */
-  unsupported?: boolean;
-}
+const BACKOFF_MS = [150, 400, 1_000] as const;
 
-export async function fetchPoolQuota(port: number, modelID: string, timeoutMs: number): Promise<ProxyPoolResult> {
+async function fetchOnce(url: string, modelID: string, timeoutMs: number): Promise<Fetched<AntigravityPool>> {
   let response: Response;
   try {
-    response = await fetch(`http://127.0.0.1:${port}/api/quota?model=${encodeURIComponent(modelID)}`, {
+    response = await fetch(`${url}/api/quota?model=${encodeURIComponent(modelID)}`, {
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    return { pool: null, reason: failureReason(error) };
+    return { ok: false, error: describeFetchError(error) };
   }
-
-  if (response.status === 404) return { pool: null, reason: "http", unsupported: true };
-  if (!response.ok) return { pool: null, reason: "http" };
+  if (!response.ok) return { ok: false, error: httpError(response.status) };
 
   try {
-    const pool = (await response.json()) as ProxyPoolQuota;
-    if (!pool || !Array.isArray(pool.windows)) return { pool: null, reason: "parse" };
-    return { pool, reason: null };
+    const data = (await response.json()) as AntigravityPool;
+    if (!data || !Array.isArray(data.windows)) return { ok: false, error: MESSAGES.invalidResponse };
+    return { ok: true, data };
   } catch {
-    return { pool: null, reason: "parse" };
+    return { ok: false, error: MESSAGES.invalidResponse };
   }
+}
+
+export async function fetchPool(url: string, modelID: string, timeoutMs: number): Promise<Fetched<AntigravityPool>> {
+  let result = await fetchOnce(url, modelID, timeoutMs);
+  for (const delay of BACKOFF_MS) {
+    if (result.ok) return result;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    result = await fetchOnce(url, modelID, timeoutMs);
+  }
+  return result;
 }

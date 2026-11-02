@@ -2,8 +2,9 @@
  * OpenCode Go: credentials resolution.
  *
  * The scraping needs a workspace id + auth cookie. Resolution order: env vars
- * (OPENCODE_GO_WORKSPACE_ID / OPENCODE_GO_AUTH_COOKIE), then the legacy
- * `opencode-quota/quota.json` file in the opencode config dir.
+ * (OPENCODE_GO_WORKSPACE_ID / OPENCODE_GO_AUTH_COOKIE), then the
+ * `opencode-quota/quota.json` file in the opencode config dir:
+ * `{ "credentials": { "workspaceId": "...", "authCookie": "..." } }`.
  */
 
 import { readFile } from "node:fs/promises";
@@ -52,7 +53,7 @@ export async function resolveCredentials(): Promise<ResolvedCredentials> {
     if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
       return { state: "missing" };
     }
-    return { state: "invalid", error: `Failed to read config file: ${String(error)}` };
+    return { state: "invalid", error: `cannot read quota.json: ${error instanceof Error ? error.message : String(error)}` };
   }
 
   let parsed: unknown;
@@ -61,12 +62,12 @@ export async function resolveCredentials(): Promise<ResolvedCredentials> {
   } catch (error) {
     return {
       state: "invalid",
-      error: `Failed to parse JSON: ${error instanceof Error ? error.message : String(error)}`,
+      error: `invalid JSON in quota.json: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { state: "invalid", error: "Config file must contain a JSON object" };
+    return { state: "invalid", error: "quota.json must contain a JSON object" };
   }
 
   const credentials = (parsed as { credentials?: unknown }).credentials;

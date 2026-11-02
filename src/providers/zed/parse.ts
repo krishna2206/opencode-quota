@@ -1,23 +1,29 @@
-import type { QuotaEntry } from "../types.js";
-import type { ZedProxyQuotaResponse } from "./fetch.js";
+/** Zed: the connected account's USD spend against its monthly allowance. */
+
+import type { ProviderResult } from "../../quota/types.js";
+import { failure, MESSAGES } from "../errors.js";
+import type { ZedQuota } from "./fetch.js";
 
 export const ZED_LABEL = "Zed";
 
-/**
- * Zed is pay-per-token: one USD spend entry of the connected account, no windows.
- */
-export function buildZedEntries(data: ZedProxyQuotaResponse): QuotaEntry[] {
-  const credits = data.credits;
-  if (!credits || typeof credits.usedUsd !== "number") return [];
+export function parseZedQuota(data: ZedQuota): ProviderResult {
+  if (data.status !== "ok" || !data.credits) return failure(data.message?.trim() || MESSAGES.noAccount);
 
-  return [
-    {
-      kind: "spend",
-      name: ZED_LABEL,
-      group: ZED_LABEL,
-      usedUsd: credits.usedUsd,
-      allowanceUsd: credits.monthlyAllowance > 0 ? credits.monthlyAllowance : undefined,
-      resetTimeIso: credits.renewsAt ?? undefined,
-    },
-  ];
+  // Actionable states win over the spend: the account cannot serve requests until reconnected.
+  const state = data.state?.status;
+  if (state === "login_required") return failure("login required (/zed-login)");
+  if (state === "exhausted") return failure("credits exhausted (/zed-login)");
+
+  const { usedUsd, monthlyAllowance, renewsAt } = data.credits;
+  if (!Number.isFinite(usedUsd)) return failure(MESSAGES.invalidResponse);
+
+  return {
+    ok: true,
+    quotas: [{
+      kind: "tokens",
+      usedUsd,
+      ...(monthlyAllowance > 0 ? { allowanceUsd: monthlyAllowance } : {}),
+      ...(renewsAt ? { resetAt: renewsAt } : {}),
+    }],
+  };
 }

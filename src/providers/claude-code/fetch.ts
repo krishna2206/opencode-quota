@@ -1,11 +1,9 @@
-/**
- * Claude Code: HTTP fetch of the local proxy /api/quota.
- */
+/** Claude Code: GET <url>/api/quota on claude-code-proxy (one subscription, 5h and 7d). */
 
-export const CLAUDE_CODE_DEFAULT_PORT = 7439;
-export const CLAUDE_CODE_STATUS_TIMEOUT_MS = 5_000;
+import { describeFetchError, httpError, MESSAGES } from "../errors.js";
+import type { Fetched } from "../provider.js";
 
-export interface ClaudeQuotaWindow {
+export interface ClaudeCodeWindow {
   status: string;
   utilization: number;
   utilizationPercent: number;
@@ -14,70 +12,27 @@ export interface ClaudeQuotaWindow {
   resetsInSeconds?: number | null;
 }
 
-export interface ClaudeCodeQuotaResponse {
+export interface ClaudeCodeQuota {
   status: "ok" | "unavailable";
   organizationId?: string | null;
   workspaceId?: string | null;
-  fiveHour?: ClaudeQuotaWindow | null;
-  sevenDay?: ClaudeQuotaWindow | null;
+  fiveHour?: ClaudeCodeWindow | null;
+  sevenDay?: ClaudeCodeWindow | null;
   lastUpdatedIso?: string | null;
 }
 
-export type ClaudeFetchFailureReason =
-  | "refused"
-  | "timeout"
-  | "http"
-  | "parse"
-  | "network";
-
-export interface ClaudeQuotaResult {
-  quota: ClaudeCodeQuotaResponse | null;
-  reason: ClaudeFetchFailureReason | null;
-}
-
-function failureReason(error: unknown): ClaudeFetchFailureReason {
-  const errno = error as { code?: string; cause?: unknown } | undefined;
-  const code =
-    errno?.code ??
-    (errno?.cause && typeof errno.cause === "object"
-      ? (errno.cause as { code?: string }).code
-      : undefined);
-
-  if (error instanceof Error && error.name === "TimeoutError") return "timeout";
-  if (code === "ECONNREFUSED" || code === "ECONNRESET") return "refused";
-  return "network";
-}
-
-export async function resolveClaudeProxyPort(): Promise<number> {
-  const envPort = process.env.CLAUDE_CODE_PROXY_PORT?.trim();
-  if (envPort) {
-    const parsed = Number(envPort);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-  return CLAUDE_CODE_DEFAULT_PORT;
-}
-
-export async function fetchClaudeCodeQuota(
-  port: number,
-  timeoutMs: number,
-): Promise<ClaudeQuotaResult> {
+export async function fetchClaudeCodeQuota(url: string, timeoutMs: number): Promise<Fetched<ClaudeCodeQuota>> {
   let response: Response;
   try {
-    response = await fetch(`http://127.0.0.1:${port}/api/quota`, {
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    response = await fetch(`${url}/api/quota`, { signal: AbortSignal.timeout(timeoutMs) });
   } catch (error) {
-    return { quota: null, reason: failureReason(error) };
+    return { ok: false, error: describeFetchError(error) };
   }
-
-  if (!response.ok) {
-    return { quota: null, reason: "http" };
-  }
+  if (!response.ok) return { ok: false, error: httpError(response.status) };
 
   try {
-    const quota = (await response.json()) as ClaudeCodeQuotaResponse;
-    return { quota, reason: null };
+    return { ok: true, data: (await response.json()) as ClaudeCodeQuota };
   } catch {
-    return { quota: null, reason: "parse" };
+    return { ok: false, error: MESSAGES.invalidResponse };
   }
 }

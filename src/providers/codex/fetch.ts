@@ -1,11 +1,9 @@
-/**
- * Codex: HTTP fetch of the local proxy /api/quota.
- */
+/** Codex: GET <url>/api/quota on codex-proxy (the pool of its accounts, 5h and 7d). */
 
-export const CODEX_DEFAULT_PORT = 7440;
-export const CODEX_STATUS_TIMEOUT_MS = 5_000;
+import { describeFetchError, httpError, MESSAGES } from "../errors.js";
+import type { Fetched } from "../provider.js";
 
-export interface CodexQuotaWindow {
+export interface CodexWindow {
   window: string;
   displayName: string;
   status: string;
@@ -18,71 +16,28 @@ export interface CodexQuotaWindow {
   contributingAccounts?: number;
 }
 
-export interface CodexProxyQuotaResponse {
+export interface CodexQuota {
   status: "ok" | "unavailable";
   provider?: string;
   accountsCount?: number;
   activeAccountsCount?: number;
-  fiveHour?: CodexQuotaWindow | null;
-  sevenDay?: CodexQuotaWindow | null;
+  fiveHour?: CodexWindow | null;
+  sevenDay?: CodexWindow | null;
   timestamp?: string;
 }
 
-export type CodexFetchFailureReason =
-  | "refused"
-  | "timeout"
-  | "http"
-  | "parse"
-  | "network";
-
-export interface CodexQuotaResult {
-  quota: CodexProxyQuotaResponse | null;
-  reason: CodexFetchFailureReason | null;
-}
-
-function failureReason(error: unknown): CodexFetchFailureReason {
-  const errno = error as { code?: string; cause?: unknown } | undefined;
-  const code =
-    errno?.code ??
-    (errno?.cause && typeof errno.cause === "object"
-      ? (errno.cause as { code?: string }).code
-      : undefined);
-
-  if (error instanceof Error && error.name === "TimeoutError") return "timeout";
-  if (code === "ECONNREFUSED" || code === "ECONNRESET") return "refused";
-  return "network";
-}
-
-export async function resolveCodexProxyPort(): Promise<number> {
-  const envPort = process.env.CODEX_PROXY_PORT?.trim();
-  if (envPort) {
-    const parsed = Number(envPort);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-  return CODEX_DEFAULT_PORT;
-}
-
-export async function fetchCodexProxyQuota(
-  port: number,
-  timeoutMs: number,
-): Promise<CodexQuotaResult> {
+export async function fetchCodexQuota(url: string, timeoutMs: number): Promise<Fetched<CodexQuota>> {
   let response: Response;
   try {
-    response = await fetch(`http://127.0.0.1:${port}/api/quota`, {
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    response = await fetch(`${url}/api/quota`, { signal: AbortSignal.timeout(timeoutMs) });
   } catch (error) {
-    return { quota: null, reason: failureReason(error) };
+    return { ok: false, error: describeFetchError(error) };
   }
-
-  if (!response.ok) {
-    return { quota: null, reason: "http" };
-  }
+  if (!response.ok) return { ok: false, error: httpError(response.status) };
 
   try {
-    const quota = (await response.json()) as CodexProxyQuotaResponse;
-    return { quota, reason: null };
+    return { ok: true, data: (await response.json()) as CodexQuota };
   } catch {
-    return { quota: null, reason: "parse" };
+    return { ok: false, error: MESSAGES.invalidResponse };
   }
 }

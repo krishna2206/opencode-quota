@@ -8,7 +8,12 @@
  *
  * SSR is tried first, then data-slot parsing. Non-OK responses and unparseable
  * pages resolve to a structured failure (never throw).
+ *
+ * Retry policy: an external SaaS scrape, slower and more prone to transient
+ * failures than a local proxy, so fewer retries with a longer, growing backoff.
  */
+
+import type { Fetched } from "../provider.js";
 
 export const OPENCODE_GO_DASHBOARD_URL_PREFIX = "https://opencode.ai/workspace/";
 export const OPENCODE_GO_DASHBOARD_URL_SUFFIX = "/go";
@@ -39,9 +44,9 @@ export interface ScrapedWindowUsage {
 
 export type ScrapedUsage = Partial<Record<"rolling" | "weekly" | "monthly", ScrapedWindowUsage>>;
 
-export type OpenCodeGoFetchResult =
-  | { success: true; usage: ScrapedUsage }
-  | { success: false; error: string };
+export type OpenCodeGoFetchResult = Fetched<ScrapedUsage>;
+
+export const OPENCODE_GO_BACKOFF_MS = [3_000, 8_000, 15_000] as const;
 
 function sanitizeMessage(text: string, maxLength = 120): string {
   const sanitized = text.replaceAll(/\p{C}/gu, " ").replace(/\s+/g, " ").trim();
@@ -170,8 +175,8 @@ async function consumeResponse(response: Response): Promise<OpenCodeGoFetchResul
   if (!response.ok) {
     const text = await response.text();
     return {
-      success: false,
-      error: `OpenCode Go dashboard error ${response.status}: ${sanitizeMessage(text)}`,
+      ok: false,
+      error: `dashboard error ${response.status}: ${sanitizeMessage(text)}`,
     };
   }
 
@@ -179,13 +184,10 @@ async function consumeResponse(response: Response): Promise<OpenCodeGoFetchResul
   const usage = parseUsageFromHtml(html);
 
   if (usage.rolling || usage.weekly || usage.monthly) {
-    return { success: true, usage };
+    return { ok: true, data: usage };
   }
 
-  return {
-    success: false,
-    error: "Could not parse any OpenCode Go dashboard usage windows (rollingUsage, weeklyUsage)",
-  };
+  return { ok: false, error: "no usage windows on the dashboard" };
 }
 
 export async function fetchOpenCodeGoDashboard(options: {
@@ -210,8 +212,22 @@ export async function fetchOpenCodeGoDashboard(options: {
     return await consumeResponse(response);
   } catch (error) {
     return {
-      success: false,
+      ok: false,
       error: sanitizeMessage(error instanceof Error ? error.message : String(error)),
     };
   }
+}
+
+export async function fetchOpenCodeGoWithRetry(options: {
+  workspaceId: string;
+  authCookie: string;
+  timeoutMs: number;
+}): Promise<OpenCodeGoFetchResult> {
+  let result = await fetchOpenCodeGoDashboard(options);
+  for (const delay of OPENCODE_GO_BACKOFF_MS) {
+    if (result.ok) return result;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    result = await fetchOpenCodeGoDashboard(options);
+  }
+  return result;
 }

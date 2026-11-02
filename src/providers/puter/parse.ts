@@ -1,17 +1,26 @@
-import type { QuotaEntry } from "../types.js";
-import type { PuterQuotaResponse } from "./fetch.js";
+/** Puter: credits used over the monthly allowance, as puter-proxy sums them. */
+
+import type { ProviderResult } from "../../quota/types.js";
+import { failure, MESSAGES } from "../errors.js";
+import type { PuterQuota } from "./fetch.js";
 
 export const PUTER_LABEL = "Puter";
 
-export function buildPuterEntries(data: PuterQuotaResponse): QuotaEntry[] {
+export function parsePuterQuota(data: PuterQuota): ProviderResult {
+  if (data.status !== "ok") return failure(data.message?.trim() || MESSAGES.unavailable);
+
   const credits = data.credits;
-  if (!credits || typeof credits.remaining !== "number" || typeof credits.monthlyAllowance !== "number") return [];
-  return [{
-    kind: "credits",
-    name: PUTER_LABEL,
-    group: PUTER_LABEL,
-    remaining: credits.remaining,
-    allowance: credits.monthlyAllowance,
-    resetTimeIso: credits.resetsAt,
-  }];
+  if (!credits || !Number.isFinite(credits.used) || !Number.isFinite(credits.monthlyAllowance)) {
+    return failure("credit allowance missing");
+  }
+
+  return {
+    ok: true,
+    quotas: [{
+      kind: "credits",
+      used: credits.used,
+      allowance: credits.monthlyAllowance,
+      ...(credits.resetsAt ? { resetAt: credits.resetsAt } : {}),
+    }],
+  };
 }

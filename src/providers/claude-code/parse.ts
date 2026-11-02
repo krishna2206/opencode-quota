@@ -1,32 +1,18 @@
-import type { QuotaEntry } from "../types.js";
-import type { ClaudeCodeQuotaResponse } from "./fetch.js";
+/** Claude Code: the subscription's 5h and 7d windows. */
+
+import type { ProviderResult, QuotaWindow } from "../../quota/types.js";
+import { failure, MESSAGES } from "../errors.js";
+import type { ClaudeCodeQuota, ClaudeCodeWindow } from "./fetch.js";
 
 export const CLAUDE_CODE_LABEL = "Claude";
 
-export function buildClaudeCodeEntries(data: ClaudeCodeQuotaResponse): QuotaEntry[] {
-  const entries: QuotaEntry[] = [];
+function toWindow(span: QuotaWindow["span"], window: ClaudeCodeWindow | null | undefined): QuotaWindow[] {
+  if (!window || !Number.isFinite(window.remainingPercent)) return [];
+  return [{ span, remainingPercent: window.remainingPercent, ...(window.resetsAtIso ? { resetAt: window.resetsAtIso } : {}) }];
+}
 
-  if (data.fiveHour && typeof data.fiveHour.remainingPercent === "number") {
-    entries.push({
-      kind: "percent",
-      name: `${CLAUDE_CODE_LABEL} 5h`,
-      group: CLAUDE_CODE_LABEL,
-      label: "5h",
-      percentRemaining: data.fiveHour.remainingPercent,
-      resetTimeIso: data.fiveHour.resetsAtIso ?? undefined,
-    });
-  }
-
-  if (data.sevenDay && typeof data.sevenDay.remainingPercent === "number") {
-    entries.push({
-      kind: "percent",
-      name: `${CLAUDE_CODE_LABEL} 7d`,
-      group: CLAUDE_CODE_LABEL,
-      label: "7d",
-      percentRemaining: data.sevenDay.remainingPercent,
-      resetTimeIso: data.sevenDay.resetsAtIso ?? undefined,
-    });
-  }
-
-  return entries;
+export function parseClaudeCodeQuota(data: ClaudeCodeQuota): ProviderResult {
+  if (data.status !== "ok") return failure(MESSAGES.unavailable);
+  const windows = [...toWindow("5h", data.fiveHour), ...toWindow("7d", data.sevenDay)];
+  return { ok: true, quotas: windows.length > 0 ? [{ kind: "window", windows }] : [] };
 }

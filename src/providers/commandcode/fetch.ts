@@ -1,11 +1,9 @@
-/**
- * Command Code: HTTP fetch of the local proxy /api/quota.
- */
+/** Command Code: GET <url>/api/quota on commandcode-proxy (USD credits, 5h and 7d caps). */
 
-export const COMMANDCODE_DEFAULT_PORT = 7442;
-export const COMMANDCODE_STATUS_TIMEOUT_MS = 5_000;
+import { describeFetchError, httpError, MESSAGES } from "../errors.js";
+import type { Fetched } from "../provider.js";
 
-export interface CommandCodeQuotaWindow {
+export interface CommandCodeCap {
   window: string;
   displayName: string;
   cap: number;
@@ -17,7 +15,7 @@ export interface CommandCodeQuotaWindow {
   resetsInSeconds?: number | null;
 }
 
-export interface CommandCodeProxyQuotaResponse {
+export interface CommandCodeQuota {
   status: "ok" | "error";
   provider?: string;
   account?: {
@@ -34,66 +32,23 @@ export interface CommandCodeProxyQuotaResponse {
     usedPercent: number;
     remainingPercent: number;
   } | null;
-  fiveHour?: CommandCodeQuotaWindow | null;
-  sevenDay?: CommandCodeQuotaWindow | null;
+  fiveHour?: CommandCodeCap | null;
+  sevenDay?: CommandCodeCap | null;
   timestamp?: string;
 }
 
-export type CommandCodeFetchFailureReason =
-  | "refused"
-  | "timeout"
-  | "http"
-  | "parse"
-  | "network";
-
-export interface CommandCodeQuotaResult {
-  quota: CommandCodeProxyQuotaResponse | null;
-  reason: CommandCodeFetchFailureReason | null;
-}
-
-function failureReason(error: unknown): CommandCodeFetchFailureReason {
-  const errno = error as { code?: string; cause?: unknown } | undefined;
-  const code =
-    errno?.code ??
-    (errno?.cause && typeof errno.cause === "object"
-      ? (errno.cause as { code?: string }).code
-      : undefined);
-
-  if (error instanceof Error && error.name === "TimeoutError") return "timeout";
-  if (code === "ECONNREFUSED" || code === "ECONNRESET") return "refused";
-  return "network";
-}
-
-export async function resolveCommandCodeProxyPort(): Promise<number> {
-  const envPort = process.env.COMMANDCODE_PROXY_PORT?.trim();
-  if (envPort) {
-    const parsed = Number(envPort);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-  return COMMANDCODE_DEFAULT_PORT;
-}
-
-export async function fetchCommandCodeProxyQuota(
-  port: number,
-  timeoutMs: number,
-): Promise<CommandCodeQuotaResult> {
+export async function fetchCommandCodeQuota(url: string, timeoutMs: number): Promise<Fetched<CommandCodeQuota>> {
   let response: Response;
   try {
-    response = await fetch(`http://127.0.0.1:${port}/api/quota`, {
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    response = await fetch(`${url}/api/quota`, { signal: AbortSignal.timeout(timeoutMs) });
   } catch (error) {
-    return { quota: null, reason: failureReason(error) };
+    return { ok: false, error: describeFetchError(error) };
   }
-
-  if (!response.ok) {
-    return { quota: null, reason: "http" };
-  }
+  if (!response.ok) return { ok: false, error: httpError(response.status) };
 
   try {
-    const quota = (await response.json()) as CommandCodeProxyQuotaResponse;
-    return { quota, reason: null };
+    return { ok: true, data: (await response.json()) as CommandCodeQuota };
   } catch {
-    return { quota: null, reason: "parse" };
+    return { ok: false, error: MESSAGES.invalidResponse };
   }
 }
