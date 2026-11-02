@@ -3,7 +3,7 @@
  *
  * The scraping needs a workspace id + auth cookie. Resolution order: env vars
  * (OPENCODE_GO_WORKSPACE_ID / OPENCODE_GO_AUTH_COOKIE), then the legacy
- * `opencode-hud/hud.json` file in the opencode config dir.
+ * `opencode-quota/quota.json` file in the opencode config dir.
  */
 
 import { readFile } from "node:fs/promises";
@@ -27,7 +27,7 @@ function configDir(): string {
 }
 
 function configFilePath(): string {
-  return join(configDir(), "opencode-hud", "hud.json");
+  return join(configDir(), "opencode-quota", "quota.json");
 }
 
 export async function resolveCredentials(): Promise<ResolvedCredentials> {

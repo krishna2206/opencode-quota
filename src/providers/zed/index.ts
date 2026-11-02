@@ -1,5 +1,5 @@
 /**
- * Zed proxy provider for OpenCode HUD.
+ * Zed proxy provider for opencode-quota.
  *
  * Reads the pay-per-token spend (USD, of the connected account) from zed-proxy (GET /api/quota).
  */

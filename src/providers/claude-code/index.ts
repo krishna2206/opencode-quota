@@ -1,5 +1,5 @@
 /**
- * Claude Code proxy provider for OpenCode HUD.
+ * Claude Code proxy provider for opencode-quota.
  *
  * Reads live Claude Code subscription quota (5h & 7d windows) from claude-code-proxy (GET /api/quota).
  */

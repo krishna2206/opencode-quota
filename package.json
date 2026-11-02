@@ -1,5 +1,5 @@
 {
-  "name": "opencode-hud",
+  "name": "opencode-quota",
   "version": "0.2.0",
   "main": "./dist/index.js",
   "devDependencies": {
@@ -27,7 +27,7 @@
       "default": "./dist/tui.js"
     }
   },
-  "description": "OpenCode HUD minimal: model quota and live prompt-cache stats above the prompt.",
+  "description": "OpenCode quota: the quota behind the current model and live prompt-cache stats, under the prompt.",
   "engines": {
     "node": ">=22.0.0"
   },

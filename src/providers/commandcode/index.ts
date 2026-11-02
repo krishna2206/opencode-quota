@@ -1,5 +1,5 @@
 /**
- * Command Code proxy provider for OpenCode HUD.
+ * Command Code proxy provider for opencode-quota.
  *
  * Reads live Command Code subscription quota (5h & 7d windows) from commandcode-proxy (GET /api/quota).
  */

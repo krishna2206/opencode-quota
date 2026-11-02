@@ -1,5 +1,5 @@
 /**
- * Codex proxy provider for OpenCode HUD.
+ * Codex proxy provider for opencode-quota.
  *
  * Reads live Codex subscription quota (5h & 7d windows) from codex-proxy (GET /api/quota).
  */

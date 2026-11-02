@@ -27,7 +27,7 @@ import {
 type Ctx = Plugin.Context;
 type Theme = Ctx["theme"];
 
-const id = "opencode-hud";
+const id = "opencode-quota";
 
 const REFRESH_INTERVAL_MS = 60_000;
 const EVENT_REFRESH_DELAYS_MS = [150, 600] as const;
@@ -392,7 +392,7 @@ function StatusLine(props: {
 }
 
 /**
- * The `app` slot is global: it renders under every route. The HUD only has
+ * The `app` slot is global: it renders under every route. The quota line only has
  * something to say inside a session, so it follows the router.
  */
 function AppLine(props: { ctx: Ctx; quota: QuotaState }) {
