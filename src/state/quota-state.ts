@@ -14,7 +14,7 @@ import { createRefreshLifecycle } from "../refresh/lifecycle.js";
 import { throttleLeading } from "../refresh/throttle.js";
 import type { ProviderView } from "../render/line.js";
 import { extractModel, getSessionModel } from "../session/model.js";
-import { nextView } from "./views.js";
+import { nextFailedView, nextView } from "./views.js";
 
 type Ctx = Plugin.Context;
 
@@ -65,6 +65,10 @@ export function createQuotaState(ctx: Ctx): QuotaState {
       if (key !== target.key) return;
       const previous = views();
       setViews(target.providers.map((provider, index) => nextView(previous[index], provider.label, results[index]!)));
+    },
+    onFailure: () => {
+      const previous = views();
+      setViews(target.providers.map((provider, index) => nextFailedView(previous[index], provider.label)));
     },
     intervalMs: REFRESH_INTERVAL_MS,
     eventRefreshDelaysMs: EVENT_REFRESH_DELAYS_MS,

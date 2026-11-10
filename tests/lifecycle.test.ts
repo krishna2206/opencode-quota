@@ -138,4 +138,94 @@ describe("createRefreshLifecycle", () => {
     await tick(40);
     expect(lifecycle.stats.loads).toBe(loadsBeforeDispose);
   });
+
+  it("a load that never settles does not block the next ones", async () => {
+    let schedule: () => void = () => {};
+    let calls = 0;
+    const applied: string[] = [];
+    let failures = 0;
+
+    const lifecycle = createRefreshLifecycle({
+      load: () => {
+        calls += 1;
+        return calls === 1 ? new Promise<string>(() => {}) : Promise.resolve(`load ${calls}`);
+      },
+      apply: (value) => { applied.push(value); },
+      onFailure: () => { failures += 1; },
+      loadTimeoutMs: 20,
+      intervalMs: 60_000,
+      eventRefreshDelaysMs: [60],
+      subscribe: (scheduleRefresh) => {
+        schedule = scheduleRefresh;
+        return [];
+      },
+    });
+
+    await tick(40);
+    expect(failures).toBe(1);
+    expect(applied).toEqual([]);
+
+    schedule();
+    await tick(100);
+    expect(applied).toEqual(["load 2"]);
+
+    lifecycle.dispose();
+  });
+
+  it("ignores the late result of an abandoned load", async () => {
+    let calls = 0;
+    const applied: string[] = [];
+    let releaseFirst: (value: string) => void = () => {};
+
+    const lifecycle = createRefreshLifecycle({
+      load: () => {
+        calls += 1;
+        return calls === 1
+          ? new Promise<string>((resolve) => { releaseFirst = resolve; })
+          : new Promise<string>((resolve) => setTimeout(() => resolve("fresh"), 5));
+      },
+      apply: (value) => { applied.push(value); },
+      loadTimeoutMs: 20,
+      intervalMs: 60_000,
+      eventRefreshDelaysMs: [],
+      subscribe: () => [],
+    });
+
+    await tick(30);
+    lifecycle.reload();
+    releaseFirst("late");
+    await tick(60);
+
+    expect(applied).toEqual(["fresh"]);
+
+    lifecycle.dispose();
+  });
+
+  it("reports a rejected load as a failure and keeps refreshing", async () => {
+    let calls = 0;
+    let failures = 0;
+    const applied: string[] = [];
+
+    const lifecycle = createRefreshLifecycle({
+      load: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("boom");
+        return "ok";
+      },
+      apply: (value) => { applied.push(value); },
+      onFailure: () => { failures += 1; },
+      intervalMs: 60_000,
+      eventRefreshDelaysMs: [],
+      subscribe: () => [],
+    });
+
+    await tick(10);
+    expect(failures).toBe(1);
+
+    lifecycle.reload();
+    await tick(10);
+    expect(applied).toEqual(["ok"]);
+
+    lifecycle.dispose();
+  });
 });

@@ -21,6 +21,11 @@ describe("Status line: golden rendering", () => {
     expect(line([ready("Antigravity", windows({ "5h": 100, "7d": 89 }))])).toBe("Antigravity · 5h 0% · 7d 11%");
   });
 
+  it("marks a quota whose refresh keeps failing as stale", () => {
+    expect(line([{ ...ready("Claude", windows({ "5h": 100, "7d": 97 })), stale: true } as ProviderView]))
+      .toBe("Claude · 5h 0% · 7d 3% (stale)");
+  });
+
   it("shows a single window on its own", () => {
     expect(line([ready("Antigravity Gemini 4 Argon", windows({ "7d": 100 }))])).toBe("Antigravity Gemini 4 Argon · 7d 0%");
   });
@@ -106,5 +111,6 @@ describe("Status line: colours", () => {
     expect(part({ kind: "error", text: "" })).toBe("error");
     expect(part({ kind: "label", text: "" })).toBe("muted");
     expect(part({ kind: "pending", text: "" })).toBe("muted");
+    expect(part({ kind: "stale", text: "" })).toBe("warning");
   });
 });

@@ -10,6 +10,12 @@
  * their result). If the collect yields no usable entries, the renderer keeps
  * the last known state (no flicker between a value and "unavailable").
  *
+ * A load that never settles must not freeze the line: loads run one at a time,
+ * so a single hung load would block every later refresh (timer and events).
+ * Each load therefore has a hard deadline; past it the load is abandoned, its
+ * late result is ignored, and `onFailure` is told so the line can show that
+ * its value is going stale.
+ *
  * Scheduling policy: a burst of events must not create a burst of timers. A
  * long agentic run emits one usage event per step, and each one would arm one
  * timer per configured delay. Timers are keyed by delay, so an arbitrarily long
@@ -42,6 +48,39 @@ export interface RefreshLifecycleOptions<T> {
   eventRefreshDelaysMs: readonly number[];
   recoveryDelaysMs?: readonly number[];
   subscribe: (scheduleRefresh: () => void) => Array<() => void>;
+  /** Longest a load may take before it is abandoned. */
+  loadTimeoutMs?: number;
+  /** A load was abandoned (deadline) or rejected: nothing was applied. */
+  onFailure?: () => void;
+}
+
+export const DEFAULT_LOAD_TIMEOUT_MS = 15_000;
+
+const LOAD_TIMED_OUT = Symbol("load timed out");
+
+/** Settles with the load's value, or with LOAD_TIMED_OUT once the deadline passes. */
+function withDeadline<T>(load: () => Promise<T>, timeoutMs: number): Promise<T | typeof LOAD_TIMED_OUT> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(LOAD_TIMED_OUT), timeoutMs);
+    let started: Promise<T>;
+    try {
+      started = load();
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error);
+      return;
+    }
+    started.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 export function createRefreshLifecycle<T>(options: RefreshLifecycleOptions<T>): RefreshLifecycle {
@@ -80,16 +119,20 @@ export function createRefreshLifecycle<T>(options: RefreshLifecycleOptions<T>): 
     loads += 1;
     const currentVersion = ++loadVersion;
 
-    void options
-      .load()
+    void withDeadline(options.load, options.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS)
       .then((next) => {
         if (disposed || currentVersion !== loadVersion) return;
+        if (next === LOAD_TIMED_OUT) {
+          options.onFailure?.();
+          return;
+        }
         options.apply(next);
       })
       .catch(() => {
         // The collect already absorbs provider errors; reaching here means a
         // programming error or an unexpected rejection. Keep the last state.
         if (disposed || currentVersion !== loadVersion) return;
+        options.onFailure?.();
       })
       .finally(() => {
         if (disposed) return;

@@ -29,6 +29,8 @@ export function tone(part: Part): Tone {
       return part.hitRatio > 0 ? "warning" : "muted";
     case "error":
       return "error";
+    case "stale":
+      return "warning";
     case "label":
     case "separator":
     case "pending":

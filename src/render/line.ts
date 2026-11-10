@@ -4,6 +4,7 @@
  *   Antigravity Claude · 5h 29% · 7d 56% · ⚡92% (40K)
  *   CommandCode · $10.00 / $10.00 · 5h 0% · 7d 0%
  *   Zed · not configured · ⚡92% (40K)
+ *   Claude · 5h 0% · 7d 3% (stale)      refreshing has been failing for a while
  *
  * Pure: no TUI, no theme. Each part carries what decides its colour (see
  * colors.ts). Percentages are the used share of a window.
@@ -24,12 +25,20 @@ export type Part =
   | { kind: "credits"; text: string; usedRatio: number }
   | { kind: "cache"; text: string; hitRatio: number }
   | { kind: "error"; text: string }
-  | { kind: "pending"; text: string };
+  | { kind: "pending"; text: string }
+  | { kind: "stale"; text: string };
 
 /** What one provider has to show for the session's model. */
 export type ProviderView = { label: string } & (
   | { status: "loading" }
-  | { status: "ready"; quotas: readonly Quota[] }
+  | {
+      status: "ready";
+      quotas: readonly Quota[];
+      /** When refreshing started to fail; absent while the quota is fresh. */
+      failingSince?: number;
+      /** Refreshing has failed for long enough that the quota may be outdated. */
+      stale?: boolean;
+    }
   | { status: "error"; error: string }
 );
 
@@ -96,7 +105,8 @@ function providerParts(view: ProviderView): Part[] {
     case "ready": {
       const groups = view.quotas.flatMap(quotaParts);
       if (groups.length === 0) return [label, { kind: "pending", text: "no quota reported" }];
-      return [label, ...joinGroups(groups, WITHIN)];
+      const shown = joinGroups(groups, WITHIN);
+      return [label, ...shown, ...(view.stale ? [{ kind: "stale" as const, text: " (stale)" }] : [])];
     }
   }
 }
